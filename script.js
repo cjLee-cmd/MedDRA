@@ -1474,47 +1474,108 @@ if (dbAutofillButton) {
   });
 }
 
-// DB 자동 입력 수행 함수
-async function performDBAutoFill(ciomsData) {
-  try {
-    // 로딩 표시
-    showLoadingOverlay();
-    updateLoadingOverlay('DB 자동 입력 중...', 0);
+// 북마클릿 코드 생성 함수
+function generateBookmarklet(ciomsData) {
+  const code = `
+(function() {
+  const data = ${JSON.stringify(ciomsData).replace(/\\/g, '\\\\').replace(/'/g, "\\'")};
 
-    // 백엔드 API 호출
-    const response = await fetch('/db-autofill', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8'
-      },
-      body: JSON.stringify(ciomsData)
+  try {
+    // 환자 정보 입력
+    const patientInitials = document.querySelector('[name="patient_initials"]');
+    if (patientInitials) patientInitials.value = data.환자_정보?.Initials || '';
+
+    const patientCountry = document.querySelector('[name="patient_country"]');
+    if (patientCountry) patientCountry.value = data.환자_정보?.Country || '';
+
+    const patientAge = document.querySelector('[name="patient_age"]');
+    if (patientAge) patientAge.value = data.환자_정보?.Age || '';
+
+    const patientSex = document.querySelector('[name="patient_sex"]');
+    if (patientSex) patientSex.value = data.환자_정보?.Sex || '';
+
+    // 반응 정보 입력
+    const reactions = data.반응_정보?.Adverse_Reactions || [];
+    reactions.forEach((reaction, i) => {
+      const index = i + 1;
+
+      // 2번째 반응부터 "부작용 추가" 버튼 클릭
+      if (i > 0) {
+        const addBtn = document.querySelector('button:has-text("+ 부작용 추가")');
+        if (addBtn) addBtn.click();
+      }
+
+      const enField = document.querySelector('[name="reaction_en_' + index + '"]');
+      const koField = document.querySelector('[name="reaction_ko_' + index + '"]');
+
+      if (enField) enField.value = reaction.english || '';
+      if (koField) koField.value = reaction.korean || '';
     });
 
-    updateLoadingOverlay('처리 중...', 50);
+    // 약물 정보 입력 (첫 번째 약물만)
+    const drugs = data.의심_약물_정보 || [];
+    if (drugs.length > 0) {
+      const drug = drugs[0];
+      const drugEnField = document.querySelector('[name="drug_name_en_1"]');
+      const drugKoField = document.querySelector('[name="drug_name_ko_1"]');
 
-    const result = await response.json();
-
-    hideLoadingOverlay();
-
-    if (response.ok && result.success) {
-      alert(
-        '✅ DB 자동 입력 완료!\n\n' +
-        'MedDRA-DB 사이트에 CIOMS 데이터가 성공적으로 입력되었습니다.\n\n' +
-        '자동 입력된 데이터:\n' +
-        `- 환자 정보: ${ciomsData.환자_정보?.환자_이니셜 || 'N/A'}\n` +
-        `- 유해 반응 수: ${ciomsData.반응_정보?.Adverse_Reactions?.length || 0}\n` +
-        `- 약물 수: ${ciomsData.의약품_정보?.약물_목록?.length || 0}`
-      );
-    } else {
-      throw new Error(result.error || 'Unknown error');
+      if (drugEnField && drug.drug_name) drugEnField.value = drug.drug_name.english || '';
+      if (drugKoField && drug.drug_name) drugKoField.value = drug.drug_name.korean || '';
     }
+
+    alert('✅ 자동 입력 완료!\\n\\n저장 버튼을 눌러주세요.');
   } catch (error) {
-    hideLoadingOverlay();
+    alert('❌ 자동 입력 실패: ' + error.message);
+  }
+})();
+  `.trim();
+
+  return 'javascript:' + encodeURIComponent(code);
+}
+
+// DB 자동 입력 수행 함수 (북마클릿 방식)
+async function performDBAutoFill(ciomsData) {
+  try {
+    // 북마클릿 URL 생성
+    const bookmarkletUrl = generateBookmarklet(ciomsData);
+
+    // 클립보드에 복사
+    await navigator.clipboard.writeText(bookmarkletUrl);
+
+    // 안내 메시지
+    const message = `
+📋 자동 입력 준비 완료!
+
+다음 단계를 따라주세요:
+
+1️⃣ 새 탭에서 MedDRA-DB 사이트가 열립니다
+   (로그인 후 새 폼 작성 페이지로 이동)
+
+2️⃣ 브라우저 주소창을 클릭
+
+3️⃣ 붙여넣기 (Ctrl+V 또는 Cmd+V)
+
+4️⃣ Enter 키 누르기
+
+→ 모든 필드가 자동으로 입력됩니다!
+
+입력 예정 데이터:
+- 환자 정보: ${ciomsData.환자_정보?.Initials || 'N/A'}
+- 유해 반응: ${ciomsData.반응_정보?.Adverse_Reactions?.length || 0}개
+- 약물: ${ciomsData.의심_약물_정보?.length || 0}개
+    `.trim();
+
+    alert(message);
+
+    // MedDRA-DB 사이트를 새 탭으로 열기
+    window.open('https://cjlee-cmd.github.io/MedDRA-DB/form-edit.html', '_blank');
+
+  } catch (error) {
     console.error('DB 자동 입력 오류:', error);
     alert(
-      '❌ DB 자동 입력 실패\n\n' +
+      '❌ 북마클릿 생성 실패\n\n' +
       `오류: ${error.message}\n\n` +
-      'Playwright가 설치되어 있고 서버가 실행 중인지 확인해주세요.'
+      '클립보드 접근 권한을 확인해주세요.'
     );
     throw error;
   }
